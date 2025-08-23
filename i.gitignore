@@ -1,0 +1,13 @@
+# Ignore Python venv
+venv/
+Backend/venv/
+Frontend/node_modules/
+__pycache__/
+*.pyc
+
+# Ignore environment files
+.env
+
+# Ignore build files
+dist/
+build/
