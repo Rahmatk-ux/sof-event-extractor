@@ -2,6 +2,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn, os, io, re, datetime as dt
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 
 # PDF & DOCX
 import fitz  # PyMuPDF
@@ -9,6 +12,9 @@ from docx import Document
 import pandas as pd
 
 app = FastAPI(title="SoF Event Extractor")
+frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
+app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+
 
 # --- Allow your React app to call the API during dev ---
 app.add_middleware(
