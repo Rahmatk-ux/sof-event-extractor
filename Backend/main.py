@@ -1,10 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-import uvicorn, os, io, re, datetime as dt
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
+import uvicorn, os, io, re, datetime as dt
 
 # PDF & DOCX
 import fitz  # PyMuPDF
@@ -12,8 +10,6 @@ from docx import Document
 import pandas as pd
 
 app = FastAPI(title="SoF Event Extractor")
-
-
 
 # --- Allow your React app to call the API during dev ---
 app.add_middleware(
@@ -31,7 +27,7 @@ def save_temp(upload: UploadFile) -> str:
         f.write(upload.file.read())
     return name
 
-# --- Read text from PDF (text or scanned that OCR already embedded) ---
+# --- Read text from PDF ---
 def read_pdf(path: str) -> str:
     text = []
     with fitz.open(path) as doc:
@@ -46,7 +42,6 @@ def read_docx(path: str) -> str:
     for p in doc.paragraphs:
         if p.text.strip():
             lines.append(p.text)
-    # tables (many SoFs are tabular)
     for tbl in doc.tables:
         for row in tbl.rows:
             row_text = " | ".join(cell.text.strip() for cell in row.cells)
@@ -54,7 +49,7 @@ def read_docx(path: str) -> str:
                 lines.append(row_text)
     return "\n".join(lines)
 
-# --- Heuristics for events & times ---
+# --- Heuristics ---
 EVENT_WORDS = [
     "loading","discharging","anchorage","berthing","unberthing","shifting",
     "arrival","arrived","departure","departed","sailing","bunkering",
@@ -62,14 +57,11 @@ EVENT_WORDS = [
     "hatch","stop","resume","suspension","cargo operations","ballast"
 ]
 
-# times like 07:30 or 7:30 or 07:30:15
 TIME_RE = re.compile(r"\b([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\b")
-# dates like 21/08/2025 or 21-08-25 or 21 Aug 2025
 DATE_RE = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,}\s+\d{2,4})\b", re.I)
 
 def normalize_date(s: str) -> str | None:
     s = s.strip()
-    # Try several formats
     for fmt in ("%d/%m/%Y","%d-%m-%Y","%d/%m/%y","%d-%m-%y","%d %b %Y","%d %B %Y"):
         try:
             return dt.datetime.strptime(s, fmt).date().isoformat()
@@ -91,8 +83,6 @@ def extract_events(text: str):
         line = raw.strip()
         if not line:
             continue
-
-        # update context date if a date appears on this line
         md = DATE_RE.search(line)
         if md:
             iso = normalize_date(md.group(0))
@@ -104,10 +94,6 @@ def extract_events(text: str):
         if not ev_word and not times:
             continue
 
-        # Build records:
-        # - if two+ times on a line => treat as start/end
-        # - if one time => start with unknown end
-        # - attach date if we have one in context
         if ev_word and len(times) >= 2:
             start_t = times[0]
             end_t = times[1]
@@ -133,6 +119,7 @@ def extract_events(text: str):
             })
     return events
 
+# --- API Endpoints ---
 @app.post("/extract")
 async def extract(file: UploadFile = File(...)):
     if not (file.filename.lower().endswith(".pdf") or file.filename.lower().endswith(".docx")):
@@ -140,28 +127,18 @@ async def extract(file: UploadFile = File(...)):
 
     path = save_temp(file)
     try:
-        if path.lower().endswith(".pdf"):
-            text = read_pdf(path)
-        else:
-            text = read_docx(path)
-
+        text = read_pdf(path) if path.lower().endswith(".pdf") else read_docx(path)
         events = extract_events(text)
         return {"count": len(events), "events": events}
     finally:
-        try:
-            os.remove(path)
-        except Exception:
-            pass
+        try: os.remove(path)
+        except: pass
 
 @app.post("/extract/csv")
 async def extract_csv(file: UploadFile = File(...)):
-    # Same parsing, but return CSV for download
     path = save_temp(file)
     try:
-        if path.lower().endswith(".pdf"):
-            text = read_pdf(path)
-        else:
-            text = read_docx(path)
+        text = read_pdf(path) if path.lower().endswith(".pdf") else read_docx(path)
         rows = extract_events(text)
         df = pd.DataFrame(rows)
         buf = io.StringIO()
@@ -172,14 +149,22 @@ async def extract_csv(file: UploadFile = File(...)):
                                  headers={"Content-Disposition":"attachment; filename=events.csv"})
     finally:
         try: os.remove(path)
-        except Exception: pass
+        except: pass
 
-@app.get("/")
-def root():
-    return JSONResponse({"ok": True, "message": "SoF Extractor API running"})
-
+# --- Serve Frontend ---
 frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")    
+app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    with open(os.path.join(frontend_path, "index.html"), "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def catch_all(full_path: str):
+    # React router fallback
+    with open(os.path.join(frontend_path, "index.html"), "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
