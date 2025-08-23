@@ -12,8 +12,7 @@ from docx import Document
 import pandas as pd
 
 app = FastAPI(title="SoF Event Extractor")
-frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+
 
 
 # --- Allow your React app to call the API during dev ---
@@ -178,6 +177,9 @@ async def extract_csv(file: UploadFile = File(...)):
 @app.get("/")
 def root():
     return JSONResponse({"ok": True, "message": "SoF Extractor API running"})
-    
+
+frontend_path = os.path.join(os.path.dirname(__file__), "frontend")
+app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")    
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
