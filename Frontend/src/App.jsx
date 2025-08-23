@@ -21,10 +21,10 @@ export default function App() {
       const form = new FormData();
       form.append("file", input.files[0]);
 
-      const res = await fetch(`http://127.0.0.1:8000${endpoint}`, {
+      const res = await fetch(endpoint, {
         method: "POST",
         body: form,
-      });
+        });
 
       if (!res.ok) throw new Error(`Server ${res.status}`);
 
